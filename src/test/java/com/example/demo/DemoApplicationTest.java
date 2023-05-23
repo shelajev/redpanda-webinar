@@ -13,24 +13,6 @@ import static org.hamcrest.Matchers.is;
 
 public class DemoApplicationTest extends AbstractIntegrationTest {
 
-  @Autowired
-  TalksRepository talksRepository;
-
-  @Test
-  public void contextLoads() {
-    Assertions.assertThat(talksRepository.exists("testcontainers-integration-testing")).isTrue();
-  }
-
-  @Test
-  public void healthy() {
-    given(requestSpecification)
-      .when()
-      .get("/actuator/health")
-      .then()
-      .statusCode(200)
-      .log().ifValidationFails(LogDetail.ALL);
-  }
-
   @Test
   public void testRatings() {
     String talkId = "testcontainers-integration-testing";
@@ -70,6 +52,25 @@ public class DemoApplicationTest extends AbstractIntegrationTest {
         .body("4", is(1))
         .body("5", is(2));
     });
+  }
+
+
+  @Autowired
+  TalksRepository talksRepository;
+
+  @Test
+  public void contextLoads() {
+    Assertions.assertThat(talksRepository.exists("testcontainers-integration-testing")).isTrue();
+  }
+
+  @Test
+  public void healthy() {
+    given(requestSpecification)
+      .when()
+      .get("/actuator/health")
+      .then()
+      .statusCode(200)
+      .log().ifValidationFails(LogDetail.ALL);
   }
 
   @Test
