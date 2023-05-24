@@ -56,13 +56,9 @@ public class ContainerConfig {
       @Override
       protected void containerIsStarting(InspectContainerResponse containerInfo) {
         String command = "#!/bin/bash\n";
-        command = command
-          + "/usr/bin/rpk redpanda start --mode dev-container --overprovisioned --smp=1";
-        command = command + " --kafka-addr INTERNAL://redpanda:9092,OUTSIDE://" + this.getHost() + ":"
-          + this.getMappedPort(9092);
-        command = command + " --advertise-kafka-addr INTERNAL://redpanda:9092,OUTSIDE://" + this.getHost() + ":"
-          + this.getMappedPort(9092);
-
+        command = command + " /usr/bin/rpk redpanda start --mode dev-container --overprovisioned --smp=1";
+        command = command + " --kafka-addr INTERNAL://redpanda:19092,PLAINTEXT://0.0.0.0:9092";
+        command = command + " --advertise-kafka-addr INTERNAL://redpanda:19092,PLAINTEXT://" + this.getHost() + ":"+ this.getMappedPort(9092);
         this.copyFileToContainer(Transferable.of(command, 511), "/testcontainers_start.sh");
       }
     }.withNetwork(network)
@@ -72,7 +68,7 @@ public class ContainerConfig {
 
     String consoleConfig = """
       kafka:
-        brokers: ["redpanda:9092"]
+        brokers: ["redpanda:19092"]
         schemaRegistry:
           enabled: true
           urls: ["http://redpanda:8081"]
@@ -93,10 +89,9 @@ public class ContainerConfig {
       .dependsOn(redpanda);
 
     Startables.deepStart(redpanda, console).join();
-    System.out.println("Oleg OLEG OLEG OLEG");
-    System.out.println("Redpanda bootstrap servers: " + redpanda.getBootstrapServers());
+    System.out.println("");
     System.out.println("Redpanda Console url: http://" + console.getHost() + ":" + console.getFirstMappedPort() + "/");
-    System.out.println("Oleg OLEG OLEG OLEG");
+    System.out.println("");
     return redpanda;
 
   }
