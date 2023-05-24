@@ -2,16 +2,26 @@ package com.example.demo;
 
 import com.example.demo.model.Rating;
 import com.example.demo.repository.TalksRepository;
+import io.restassured.RestAssured;
+import io.restassured.builder.RequestSpecBuilder;
 import io.restassured.filter.log.LogDetail;
+import io.restassured.specification.RequestSpecification;
 import org.assertj.core.api.Assertions;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.context.SpringBootTest;
+import org.springframework.boot.test.web.server.LocalServerPort;
+import org.springframework.http.HttpHeaders;
+import org.springframework.http.MediaType;
 
 import static io.restassured.RestAssured.given;
 import static org.awaitility.Awaitility.await;
 import static org.hamcrest.Matchers.is;
-
-public class DemoApplicationTest extends AbstractIntegrationTest {
+@SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
+  properties = {
+  }, classes = {ContainerConfig.class})
+public class DemoApplicationTest {
 
   @Test
   public void testRatings() {
@@ -83,5 +93,23 @@ public class DemoApplicationTest extends AbstractIntegrationTest {
       .post("/ratings")
       .then()
       .statusCode(404);
+  }
+
+
+  protected RequestSpecification requestSpecification;
+
+  @LocalServerPort
+  protected int localServerPort;
+
+  @BeforeEach
+  public void setUpAbstractIntegrationTest() {
+    RestAssured.enableLoggingOfRequestAndResponseIfValidationFails();
+    requestSpecification = new RequestSpecBuilder()
+      .setPort(localServerPort)
+      .addHeader(
+        HttpHeaders.CONTENT_TYPE,
+        MediaType.APPLICATION_JSON_VALUE
+      )
+      .build();
   }
 }
