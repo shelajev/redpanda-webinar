@@ -16,7 +16,7 @@ $ docker version
 ## Run the Test Application
 
 ```text
-./mvn spring-boot:test-run
+./mvnw spring-boot:test-run
 ```
 
 It would download the necessary Docker images if they aren't available in the local cache, set up the environment, and run the application. 
