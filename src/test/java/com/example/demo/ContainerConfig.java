@@ -1,16 +1,20 @@
 package com.example.demo;
 
 import com.github.dockerjava.api.command.InspectContainerResponse;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.boot.test.context.TestConfiguration;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.springframework.context.annotation.Bean;
 import org.testcontainers.containers.GenericContainer;
+import org.testcontainers.containers.KafkaContainer;
 import org.testcontainers.containers.Network;
 import org.testcontainers.containers.PostgreSQLContainer;
+import org.testcontainers.containers.output.Slf4jLogConsumer;
 import org.testcontainers.containers.wait.strategy.HostPortWaitStrategy;
+import org.testcontainers.containers.wait.strategy.Wait;
 import org.testcontainers.images.builder.Transferable;
 import org.testcontainers.lifecycle.Startables;
-import org.testcontainers.redpanda.RedpandaContainer;
 import org.testcontainers.utility.DockerImageName;
 import org.testcontainers.utility.MountableFile;
 
@@ -20,80 +24,69 @@ import java.time.temporal.ChronoUnit;
 @TestConfiguration(proxyBeanMethods = false)
 public class ContainerConfig {
 
-  @Bean
-  @ServiceConnection
-  public PostgreSQLContainer postgreSQLContainer() {
-    return new PostgreSQLContainer<>("postgres:14-alpine")
-      .withCopyToContainer(MountableFile.forClasspathResource("schema.sql"),
-        "/docker-entrypoint-initdb.d/schema.sql");
-  }
+    private final static Logger logger = LoggerFactory.getLogger(ContainerConfig.class.getName());
 
-  @Bean
-  @ServiceConnection(name = "redis")
-  public GenericContainer redis() {
-    return new GenericContainer<>("redis:6-alpine")
-      .withExposedPorts(6379);
-  }
+    @Bean
+    @ServiceConnection
+    public PostgreSQLContainer getPostgres() {
+        return new PostgreSQLContainer<>("postgres:15-alpine")
+                .withCopyToContainer(
+                        MountableFile.forClasspathResource("schema.sql"),
+                        "/docker-entrypoint-initdb.d/schema.sql")
+                .withLabel("com.testcontainers.desktop.service", "postgres");
+    }
 
-//  @Bean
-//  @ServiceConnection
-//  public RedpandaContainer kafka() {
-//    return new RedpandaContainer(
-//      DockerImageName.parse(
-//        "docker.redpanda.com/redpandadata/redpanda:v23.1.10"));
-//  }
-//}
+    @Bean
+    @ServiceConnection(name = "redis")
+    public GenericContainer getRedis() {
+        return new GenericContainer<>("redis:6-alpine")
+                .withExposedPorts(6379); // docker run -p 6379:6379 ..
+    }
 
 
   @Bean
   @ServiceConnection
-  public RedpandaContainer kafka() {
+  public KafkaContainer kafka() {
+
     Network network = Network.newNetwork();
 
-    RedpandaContainer redpanda = new RedpandaContainer(
-      DockerImageName.parse("docker.redpanda.com/redpandadata/redpanda:v23.1.10")) {
+    KafkaContainer kafka = new KafkaContainer(
+            DockerImageName.parse("confluentinc/cp-kafka:7.4.0")
+    ).withEnv("KAFKA_CONFLUENT_SCHEMA_REGISTRY_URL", "http://schemaregistry:8085").withNetworkAliases("kafka").withNetwork(network);
 
-      @Override
-      protected void containerIsStarting(InspectContainerResponse containerInfo) {
-        String command = "#!/bin/bash\n";
-        command = command + " /usr/bin/rpk redpanda start --mode dev-container --overprovisioned --smp=1";
-        command = command + " --kafka-addr INTERNAL://redpanda:19092,PLAINTEXT://0.0.0.0:9092";
-        command = command + " --advertise-kafka-addr INTERNAL://redpanda:19092,PLAINTEXT://" + this.getHost() + ":"+ this.getMappedPort(9092);
-        this.copyFileToContainer(Transferable.of(command, 511), "/testcontainers_start.sh");
-      }
-    }.withNetwork(network)
-      .withNetworkAliases("redpanda")
-      .withEnv("redpanda.auto_create_topics_enabled", "true")
-      .withEnv("group_initial_rebalance_delay", "true");
 
-    String consoleConfig = """
-      kafka:
-        brokers: ["redpanda:19092"]
-        schemaRegistry:
-          enabled: true
-          urls: ["http://redpanda:8081"]
-      redpanda:
-        adminApi:
-          enabled: true
-          urls: ["http://redpanda:9644"]
-      """;
+      GenericContainer<?> schemaRegistry = new GenericContainer<>("confluentinc/cp-schema-registry:latest")
+              .withExposedPorts(8085)
+              .withNetworkAliases("schemaregistry").withNetwork(network)
+              .withEnv("SCHEMA_REGISTRY_KAFKASTORE_BOOTSTRAP_SERVERS", "PLAINTEXT://kafka:9092")
+              .withEnv("SCHEMA_REGISTRY_LISTENERS", "http://0.0.0.0:8085")
+              .withEnv("SCHEMA_REGISTRY_HOST_NAME", "schemaregistry")
+              .withEnv("SCHEMA_REGISTRY_KAFKASTORE_SECURITY_PROTOCOL", "PLAINTEXT")
+              .waitingFor(Wait.forHttp("/subjects"))
+              .withStartupTimeout(Duration.of(120, ChronoUnit.SECONDS))
+              .dependsOn(kafka);
+//              .withLogConsumer(new Slf4jLogConsumer(logger).withPrefix("schemaReg: "));
 
-    GenericContainer<?> console = new GenericContainer<>("docker.redpanda.com/redpandadata/console:v2.2.4")
-      .withNetwork(network)
-      .withExposedPorts(8080) // where we connect to it.
-      .withCopyToContainer(Transferable.of(consoleConfig),
-        "/tmp/config.yml")
-      .withEnv("CONFIG_FILEPATH", "/tmp/config.yml")
-      .waitingFor(new HostPortWaitStrategy())
-      .withStartupTimeout(Duration.of(10, ChronoUnit.SECONDS))
-      .dependsOn(redpanda);
+      GenericContainer<?> controlCenter =
+              new GenericContainer<>("confluentinc/cp-enterprise-control-center:latest")
+                      .withExposedPorts(9021,9022)
+                      .withNetwork(network)
+                      .withEnv("CONTROL_CENTER_BOOTSTRAP_SERVERS", "BROKER://kafka:9092")
+                      .withEnv("CONTROL_CENTER_REPLICATION_FACTOR", "1")
+                      .withEnv("CONTROL_CENTER_INTERNAL_TOPICS_PARTITIONS", "1")
+                      .withEnv("CONTROL_CENTER_SCHEMA_REGISTRY_SR1_URL", "http://schemaregistry:8085")
+                      .withEnv("CONTROL_CENTER_SCHEMA_REGISTRY_URL", "http://schemaregistry:8085")
+                      .dependsOn(kafka, schemaRegistry)
+                      .waitingFor(Wait.forHttp("/clusters").forPort(9021).allowInsecure())
+                      .withStartupTimeout(Duration.of(120, ChronoUnit.SECONDS))
+//                      .withLogConsumer(new Slf4jLogConsumer(logger).withPrefix("CCenter: "))
+                      .withLabel("com.testcontainers.desktop.service", "cp-control-center");
 
-    Startables.deepStart(redpanda, console).join();
-    System.out.println("");
-    System.out.println("Redpanda Console url: http://" + console.getHost() + ":" + console.getFirstMappedPort() + "/");
-    System.out.println("");
-    return redpanda;
 
+    Startables.deepStart(kafka, schemaRegistry, controlCenter).join();
+    System.out.println("Control Center URL: " + "http://localhost:" + controlCenter.getMappedPort(9021));
+
+    return kafka;
   }
 
 }
